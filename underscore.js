@@ -39,6 +39,14 @@
   var Ctor = function() {};
 
   // Create a safe reference to the Underscore object for use below.
+  // // 创建一个undersource对象的引用以便下面可以使用
+  // 此处声明了_的函数后下面会判断运行环境并将_以适当的方式暴露出去，假设是在浏览器中使用，_会被挂在到window对象上
+  // 具体到浏览器，假设我们引入undersource脚本后写了一句 _(); 则此函数会被调用，此时运行流程如下：
+  // obj参数为undefined,故会执行return new _(obj);这句函数做了三件事：
+  // var o = {};
+  // o.__proto__ = _.prototype;
+  // _.call(o);
+  // 即先创建一个空的对象，将他的__proto__指向_函数的prototype接着再用这个新创建的对象去调用_函数
   var _ = function(obj) {
     if (obj instanceof _) return obj;
     if (!(this instanceof _)) return new _(obj);
@@ -65,6 +73,11 @@
   // Internal function that returns an efficient (for current engines) version
   // of the passed-in callback, to be repeatedly applied in other Underscore
   // functions.
+  // 此为内部调用的函数~简单来说下面这个函数是对bind写法的一个处理~或是优化~额~也方便调用吧
+  // 参数列表的意思是由指定的context来执行func函数，而func函数的参数为argCount
+  // 前面额外添加switch-case处理的四种情况是为了在已知参数数量的情况下让 js 引擎做出优化（避免使用 arguments）
+  // 若不考虑性能的提升~完全可以用最后那个return function() { return func.apply(context, arguments); };来处理
+  // 具体测试代码可查看 optimizeCbTest.js
   var optimizeCb = function(func, context, argCount) {
     if (context === void 0) return func;
     switch (argCount) {
@@ -94,6 +107,20 @@
   // An internal function to generate callbacks that can be applied to each
   // element in a collection, returning the desired result — either `identity`,
   // an arbitrary callback, a property matcher, or a property accessor.
+  // 此函数的作用是更具传进的value情况的不同返回不一样的结果：
+  // 如果传进来的value是一个函数，则调用optimizeCb返回一个高阶函数
+  // 如果传进来的value是一个对象，则使用_.matcher生成一个断言函数~断言函数的作用是判断所给对象是否具有value的所有的key-value对
+  // 举例来说假设有这样的调用var predicate = _.matcher({selected: true, visible: true});此时predicate就是一个断言函数
+  // 函数体为function(obj) {return _.isMarch(obj, attrs)} 其中的attrs就是上面的{selected: true, visible: true}
+  // 假设我们有另一个变量 var another = {name:'Xx',age: 18,.....}当我们调用断言函数时，即predicate(another)
+  // 函数做的事情是判断another这个对象时都包含{selected: true, visible: true}这两个键值对，若包含，则返回true否则返回false
+  // 而_.property函数的赋值是_.property = property;其中property的函数声明在150行左右，从中可以看到_.property(value)的结果也是一个函数
+  // function(obj) {return obj == null ? void 0 : obj[key];}
+  // 假设有如下调用：
+  // var result = _.property('name');
+  // var obj = {name: 'Xx', age: 18};
+  // result(obj);
+  // 则会得到Xx的结果，也即是说_.property函数返回一个可以得到对象指定属性的函数
   var cb = function(value, context, argCount) {
     if (_.iteratee !== builtinIteratee) return _.iteratee(value, context);
     if (value == null) return _.identity;
@@ -1119,6 +1146,13 @@
   };
 
   // An internal function for creating assigner functions.
+  // 用来生成_.extend和_.extendOwn函数的内部函数
+  // _.extend = createAssigner(_.allKeys);
+  // _.extendOwn = _.assign = createAssigner(_.keys);
+  // 两个函数的调用方式类似以_.extend为例 var obj = {}; _.extend(obj,{name:'Xx'},{age: 18});执行后obj为 Object {name: "Xx", age: 18}
+  // 两个函数的区别是_.extend会将第一个参数以后的对象的所有属性都添加到第一个参数中，包括继承的属性
+  // 而_.extendOwn只会将属于对象自身拥有的属性添加到第一个参数中即通过hasOwnProperty判断的属性
+  // keysFunc只有两种情况即_.keys和_.allKeys，这两个函数都是用来提取对象的属性名的~只是提取的属性包不包括继承的属性
   var createAssigner = function(keysFunc, defaults) {
     return function(obj) {
       var length = arguments.length;
