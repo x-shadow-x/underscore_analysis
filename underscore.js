@@ -107,14 +107,14 @@
   // An internal function to generate callbacks that can be applied to each
   // element in a collection, returning the desired result — either `identity`,
   // an arbitrary callback, a property matcher, or a property accessor.
-  // 此函数的作用是更具传进的value情况的不同返回不一样的结果：
+  // 此函数的作用是根据传进的 value情况的不同返回不一样的结果：
   // 如果传进来的value是一个函数，则调用optimizeCb返回一个高阶函数
   // 如果传进来的value是一个对象，则使用_.matcher生成一个断言函数~断言函数的作用是判断所给对象是否具有value的所有的key-value对
   // 举例来说假设有这样的调用var predicate = _.matcher({selected: true, visible: true});此时predicate就是一个断言函数
   // 函数体为function(obj) {return _.isMarch(obj, attrs)} 其中的attrs就是上面的{selected: true, visible: true}
-  // 假设我们有另一个变量 var another = {name:'Xx',age: 18,.....}当我们调用断言函数时，即predicate(another)
-  // 函数做的事情是判断another这个对象时都包含{selected: true, visible: true}这两个键值对，若包含，则返回true否则返回false
-  // 而_.property函数的赋值是_.property = property;其中property的函数声明在150行左右，从中可以看到_.property(value)的结果也是一个函数
+  // 假设我们有另一个变量 var another = {name:'Xx',age: 18,.....}当我们调用断言函数时，即 predicate(another)
+  // 函数做的事情是判断 another这个对象是否包含{selected: true, visible: true}这两个键值对，若包含，则返回true否则返回false
+  // 而_.property的函数声明在1500行左右，从中可以看到_.property(value)的结果也是一个函数
   // function(obj) {return obj == null ? void 0 : obj[key];}
   // 假设有如下调用：
   // var result = _.property('name');
@@ -246,6 +246,7 @@
   // should be iterated as an array or as an object.
   // Related: http://people.mozilla.org/~jorendorff/es6-draft.html#sec-tolength
   // Avoids a very nasty iOS 8 JIT bug on ARM-64. #2094
+  // 如果集合有Length属性且为数字并且大于0小于最大的精确整数，则判定是类数组
   var MAX_ARRAY_INDEX = Math.pow(2, 53) - 1;
   var getLength = shallowProperty('length');
   var isArrayLike = function(collection) {
@@ -293,6 +294,7 @@
     // Wrap code that reassigns argument variables in a separate function than
     // the one that accesses `arguments.length` to avoid a perf hit. (#1991)
     var reducer = function(obj, iteratee, memo, initial) {
+      // 不是类数组的话那就是对象啦，用_.keys获得该对象所有的 key值
       var keys = !isArrayLike(obj) && _.keys(obj),
         length = (keys || obj).length,
         index = dir > 0 ? 0 : length - 1;
