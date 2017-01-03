@@ -247,11 +247,14 @@
   // Related: http://people.mozilla.org/~jorendorff/es6-draft.html#sec-tolength
   // Avoids a very nasty iOS 8 JIT bug on ARM-64. #2094
   // 如果集合有Length属性且为数字并且大于0小于最大的精确整数，则判定是类数组
+  // 原来 isArrayLike的判断条件并没有(length - 1) in collection，这就导致在obj = {name:'Xx', length: 1}也被判断为类数组~
+  // 然后_.each便会根据数字下表来遍历集合~但是此时集合是不能通过下标来访问的~将导致_.each无法遍历
+  // 故在源码的基础上加上(length - 1) in collection~以便让obj = {name:'Xx', length: 1}在_.each中可以通过对象的方式遍历
   var MAX_ARRAY_INDEX = Math.pow(2, 53) - 1;
   var getLength = shallowProperty('length');
   var isArrayLike = function(collection) {
     var length = getLength(collection);
-    return typeof length == 'number' && length >= 0 && length <= MAX_ARRAY_INDEX;
+    return typeof length == 'number' && length >= 0 && length <= MAX_ARRAY_INDEX && (length - 1) in collection;
   };
 
   // Collection Functions
@@ -260,6 +263,8 @@
   // The cornerstone, an `each` implementation, aka `forEach`.
   // Handles raw objects in addition to array-likes. Treats all
   // sparse array-likes as if they were dense.
+  // 判断obj是否为类数组并以此为依据决定采用哪种方式遍历集合
+  // 而与_.map不同时这里认为 iteratee就是一个函数~使用时注意保证第二个参数是个函数
   _.each = _.forEach = function(obj, iteratee, context) {
     iteratee = optimizeCb(iteratee, context);
     var i, length;
@@ -277,6 +282,7 @@
   };
 
   // Return the results of applying the iteratee to each element.
+  // 对iteratee进行了cb包装，兼容考虑了iteratee不是函数的情况~比如如果调用的时候传递的iteratee是对象~这里就可以通过cb将其变为一个断言函数
   _.map = _.collect = function(obj, iteratee, context) {
     iteratee = cb(iteratee, context);
     var keys = !isArrayLike(obj) && _.keys(obj),
@@ -290,6 +296,7 @@
   };
 
   // Create a reducing function iterating left or right.
+  // dir 用来表示遍历的顺序，dir大于零表示从左往右，小于零表示从右往左
   var createReduce = function(dir) {
     // Wrap code that reassigns argument variables in a separate function than
     // the one that accesses `arguments.length` to avoid a perf hit. (#1991)
@@ -317,10 +324,42 @@
 
   // **Reduce** builds up a single result from a list of values, aka `inject`,
   // or `foldl`.
+  // 此函数用以将多个参数按传进的回调函数最后处理成一个
+  // 比如_.reduce([1, 2, 3], function(memo, num){ return memo + num; }, 0);最后结果为6
   _.reduce = _.foldl = _.inject = createReduce(1);
 
   // The right-associative version of reduce, also known as `foldr`.
   _.reduceRight = _.foldr = createReduce(-1);
+
+  // Returns the first key on an object that passes a predicate test.
+  _.findKey = function(obj, predicate, context) {
+    predicate = cb(predicate, context);
+    var keys = _.keys(obj),
+      key;
+    for (var i = 0, length = keys.length; i < length; i++) {
+      key = keys[i];
+      if (predicate(obj[key], key, obj)) return key;
+    }
+  };
+
+  // Generator function to create the findIndex and findLastIndex functions.
+  var createPredicateIndexFinder = function(dir) {
+    return function(array, predicate, context) {
+      predicate = cb(predicate, context);
+      var length = getLength(array);
+      var index = dir > 0 ? 0 : length - 1;
+      for (; index >= 0 && index < length; index += dir) {
+        if (predicate(array[index], index, array)) return index;
+      }
+      return -1;
+    };
+  };
+
+  // Returns the first index on an array-like that passes a predicate test.
+  // 从 createPredicateIndexFinder函数的编码来看用_.findIndex和_.findLastIndex查找集合中指定条件的项时
+  // 集合必须是数组或是可以用小标访问的类数组~不能是key-value的键值对对象
+  _.findIndex = createPredicateIndexFinder(1);
+  _.findLastIndex = createPredicateIndexFinder(-1);
 
   // Return the first value which passes a truth test. Aliased as `detect`.
   _.find = _.detect = function(obj, predicate, context) {
@@ -334,6 +373,8 @@
   _.filter = _.select = function(obj, predicate, context) {
     var results = [];
     predicate = cb(predicate, context);
+    // 回过头来看_.each~其实就是分情况对集合进行遍历比对每一个项执行指定的回调函数~集合可能是对象~也可能是数组
+    // 数组和类数组的话直接通过下标遍历~对象则需要先通过_.keys获取到key然后再以此遍历处理value
     _.each(obj, function(value, index, list) {
       if (predicate(value, index, list)) results.push(value);
     });
@@ -341,8 +382,16 @@
   };
 
   // Return all the elements for which a truth test fails.
+  // 上面写好了filter函数下面立马就用了~笔者刚看到这个函数的时候在想的是copy上面的函数然后在if判断里加多一个非操作~似乎有点累赘
   _.reject = function(obj, predicate, context) {
     return _.filter(obj, _.negate(cb(predicate)), context);
+  };
+
+  // Returns a negated version of the passed-in predicate.
+  _.negate = function(predicate) {
+    return function() {
+      return !predicate.apply(this, arguments);
+    };
   };
 
   // Determine whether all of the elements match a truth test.
@@ -370,6 +419,41 @@
     }
     return false;
   };
+
+  // Generator function to create the indexOf and lastIndexOf functions.
+  var createIndexFinder = function(dir, predicateFind, sortedIndex) {
+    return function(array, item, idx) {
+      var i = 0,
+        length = getLength(array);
+      if (typeof idx == 'number') {
+        if (dir > 0) {
+          i = idx >= 0 ? idx : Math.max(idx + length, i);
+        } else {
+          length = idx >= 0 ? Math.min(idx + 1, length) : idx + length + 1;
+        }
+      } else if (sortedIndex && idx && length) {
+        idx = sortedIndex(array, item);
+        return array[idx] === item ? idx : -1;
+      }
+      if (item !== item) {
+        // 对item为NaN的处理~这里之所以要分开来处理而不知直接只用下面的for循环去遍历比较是出于NaN === NaN结果为假的情况
+        // 假设调用者真的是希望知道数组里是否有NaN~那就不能通过下面for循环的方式来判断了
+        idx = predicateFind(slice.call(array, i, length), _.isNaN);
+        return idx >= 0 ? idx + i : -1;
+      }
+      for (idx = dir > 0 ? i : length - 1; idx >= 0 && idx < length; idx += dir) {
+        if (array[idx] === item) return idx;
+      }
+      return -1;
+    };
+  };
+  
+  // Return the position of the first occurrence of an item in an array,
+  // or -1 if the item is not included in the array.
+  // If the array is large and already in sort order, pass `true`
+  // for **isSorted** to use binary search.
+  _.indexOf = createIndexFinder(1, _.findIndex, _.sortedIndex);
+  _.lastIndexOf = createIndexFinder(-1, _.findLastIndex);
 
   // Determine if the array or object contains a given item (using `===`).
   // Aliased as `includes` and `include`.
@@ -723,25 +807,12 @@
     return result;
   };
 
-  // Generator function to create the findIndex and findLastIndex functions.
-  var createPredicateIndexFinder = function(dir) {
-    return function(array, predicate, context) {
-      predicate = cb(predicate, context);
-      var length = getLength(array);
-      var index = dir > 0 ? 0 : length - 1;
-      for (; index >= 0 && index < length; index += dir) {
-        if (predicate(array[index], index, array)) return index;
-      }
-      return -1;
-    };
-  };
-
-  // Returns the first index on an array-like that passes a predicate test.
-  _.findIndex = createPredicateIndexFinder(1);
-  _.findLastIndex = createPredicateIndexFinder(-1);
-
   // Use a comparator function to figure out the smallest index at which
   // an object should be inserted so as to maintain order. Uses binary search.
+  // iteratee可以是一个字符串，代表想要用来排序的字段
+  // 例如：var stooges = [{name: 'moe', age: 40}, {name: 'curly', age: 60}];
+  //       _.sortedIndex(stooges, {name: 'larry', age: 50}, 'age');
+  // 此时按 age的值来排序
   _.sortedIndex = function(array, obj, iteratee, context) {
     iteratee = cb(iteratee, context, 1);
     var value = iteratee(obj);
@@ -754,39 +825,6 @@
     }
     return low;
   };
-
-  // Generator function to create the indexOf and lastIndexOf functions.
-  var createIndexFinder = function(dir, predicateFind, sortedIndex) {
-    return function(array, item, idx) {
-      var i = 0,
-        length = getLength(array);
-      if (typeof idx == 'number') {
-        if (dir > 0) {
-          i = idx >= 0 ? idx : Math.max(idx + length, i);
-        } else {
-          length = idx >= 0 ? Math.min(idx + 1, length) : idx + length + 1;
-        }
-      } else if (sortedIndex && idx && length) {
-        idx = sortedIndex(array, item);
-        return array[idx] === item ? idx : -1;
-      }
-      if (item !== item) {
-        idx = predicateFind(slice.call(array, i, length), _.isNaN);
-        return idx >= 0 ? idx + i : -1;
-      }
-      for (idx = dir > 0 ? i : length - 1; idx >= 0 && idx < length; idx += dir) {
-        if (array[idx] === item) return idx;
-      }
-      return -1;
-    };
-  };
-
-  // Return the position of the first occurrence of an item in an array,
-  // or -1 if the item is not included in the array.
-  // If the array is large and already in sort order, pass `true`
-  // for **isSorted** to use binary search.
-  _.indexOf = createIndexFinder(1, _.findIndex, _.sortedIndex);
-  _.lastIndexOf = createIndexFinder(-1, _.findLastIndex);
 
   // Generate an integer Array containing an arithmetic progression. A port of
   // the native Python `range()` function. See
@@ -992,13 +1030,6 @@
     return _.partial(wrapper, func);
   };
 
-  // Returns a negated version of the passed-in predicate.
-  _.negate = function(predicate) {
-    return function() {
-      return !predicate.apply(this, arguments);
-    };
-  };
-
   // Returns a function that is the composition of a list of functions, each
   // consuming the return value of the function that follows.
   _.compose = function() {
@@ -1067,8 +1098,26 @@
     }
   };
 
+  // Shortcut function for checking if an object has a given property directly
+  // on itself (in other words, not on a prototype).
+  _.has = function(obj, path) {
+    if (!_.isArray(path)) {
+      return obj != null && hasOwnProperty.call(obj, path);
+    }
+    var length = path.length;
+    for (var i = 0; i < length; i++) {
+      var key = path[i];
+      if (obj == null || !hasOwnProperty.call(obj, key)) {
+        return false;
+      }
+      obj = obj[key];
+    }
+    return !!length;
+  };
+
   // Retrieve the names of an object's own properties.
   // Delegates to **ECMAScript 5**'s native `Object.keys`.
+  // nativeKeys = Object.keys
   _.keys = function(obj) {
     if (!_.isObject(obj)) return [];
     if (nativeKeys) return nativeKeys(obj);
@@ -1179,17 +1228,6 @@
   // Assigns a given object with all the own properties in the passed-in object(s).
   // (https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/assign)
   _.extendOwn = _.assign = createAssigner(_.keys);
-
-  // Returns the first key on an object that passes a predicate test.
-  _.findKey = function(obj, predicate, context) {
-    predicate = cb(predicate, context);
-    var keys = _.keys(obj),
-      key;
-    for (var i = 0, length = keys.length; i < length; i++) {
-      key = keys[i];
-      if (predicate(obj[key], key, obj)) return key;
-    }
-  };
 
   // Internal pick helper function to determine if `obj` has key `key`.
   var keyInObj = function(value, key, obj) {
@@ -1440,6 +1478,7 @@
   };
 
   // Is the given value `NaN`?
+  // isNaN就是平时使用的系统函数~这里只是在isNaN的判断的基础上加多了一个判断obj是否为Number类型
   _.isNaN = function(obj) {
     return _.isNumber(obj) && isNaN(obj);
   };
@@ -1457,23 +1496,6 @@
   // Is a given variable undefined?
   _.isUndefined = function(obj) {
     return obj === void 0;
-  };
-
-  // Shortcut function for checking if an object has a given property directly
-  // on itself (in other words, not on a prototype).
-  _.has = function(obj, path) {
-    if (!_.isArray(path)) {
-      return obj != null && hasOwnProperty.call(obj, path);
-    }
-    var length = path.length;
-    for (var i = 0; i < length; i++) {
-      var key = path[i];
-      if (obj == null || !hasOwnProperty.call(obj, key)) {
-        return false;
-      }
-      obj = obj[key];
-    }
-    return !!length;
   };
 
   // Utility Functions
