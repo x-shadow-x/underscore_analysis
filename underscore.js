@@ -283,6 +283,8 @@
 
   // Return the results of applying the iteratee to each element.
   // 对iteratee进行了cb包装，兼容考虑了iteratee不是函数的情况~比如如果调用的时候传递的iteratee是对象~这里就可以通过cb将其变为一个断言函数
+  // 此处map函数和数组默认提供的map函数没有什么关系，数组默认提供的map函数只能由数组调用
+  // 而此处重新实现了map函数，其不经可以处理数组，还可以处理key-value对象
   _.map = _.collect = function(obj, iteratee, context) {
     iteratee = cb(iteratee, context);
     var keys = !isArrayLike(obj) && _.keys(obj),
@@ -358,10 +360,12 @@
   // Returns the first index on an array-like that passes a predicate test.
   // 从 createPredicateIndexFinder函数的编码来看用_.findIndex和_.findLastIndex查找集合中指定条件的项时
   // 集合必须是数组或是可以用小标访问的类数组~不能是key-value的键值对对象
+  // findIndex返回第一个通过断言函数的值的索引
   _.findIndex = createPredicateIndexFinder(1);
   _.findLastIndex = createPredicateIndexFinder(-1);
 
   // Return the first value which passes a truth test. Aliased as `detect`.
+  // 返回的是第一个通过断言函数判断的值
   _.find = _.detect = function(obj, predicate, context) {
     var keyFinder = isArrayLike(obj) ? _.findIndex : _.findKey;
     var key = keyFinder(obj, predicate, context);
@@ -452,6 +456,7 @@
   // or -1 if the item is not included in the array.
   // If the array is large and already in sort order, pass `true`
   // for **isSorted** to use binary search.
+  // 返回第一个通过断言函数的值的索引
   _.indexOf = createIndexFinder(1, _.findIndex, _.sortedIndex);
   _.lastIndexOf = createIndexFinder(-1, _.findLastIndex);
 
@@ -464,6 +469,7 @@
   };
 
   // Convenience version of a common use case of `map`: fetching a property.
+  // 返回key-value对象中指定key的所有值组成的数组
   _.pluck = function(obj, key) {
     return _.map(obj, _.property(key));
   };
@@ -537,6 +543,24 @@
     return _.sample(obj, Infinity);
   };
 
+  // Create a (shallow-cloned) duplicate of an object.
+  _.clone = function(obj) {
+    if (!_.isObject(obj)) return obj;
+    return _.isArray(obj) ? obj.slice() : _.extend({}, obj);
+  };
+
+  // Retrieve the values of an object's properties.
+  // obj为一个非类数组的 key-value对象~通过此函数返回包含其所有值的数组
+  _.values = function(obj) {
+    var keys = _.keys(obj);
+    var length = keys.length;
+    var values = Array(length);
+    for (var i = 0; i < length; i++) {
+      values[i] = obj[keys[i]];
+    }
+    return values;
+  };
+
   // Sample **n** random values from a collection using the modern version of the
   // [Fisher-Yates shuffle](http://en.wikipedia.org/wiki/Fisher–Yates_shuffle).
   // If **n** is not specified, returns a single random element.
@@ -560,6 +584,11 @@
   };
 
   // Sort the object's values by a criterion produced by an iteratee.
+  // 此函数内部调用的都是此前封装的各个成员函数的应用
+  // 首先用cb包装了一下迭代器函数iteratee,然后用_.map函数对需要排序的数组做了一个包装，将每一项的原始值存在value字段以便排好序后再取出
+  // 增加一个criteria字段，此字段就是用户指定的希望用来排序的字段，同时增加一个index字段，以便在criteria字段相等的情况下按原始数组中项的相对位置来排序
+  // 用map包装好后就使用数组的排序函数进行排序，并传入排序函数指定排序的规则，最后返回排好序的结果，但此时这个结果是上面通过map包装的，
+  // 故将此结果传入_.pluck函数，指定获取每项中value字段的值~
   _.sortBy = function(obj, iteratee, context) {
     var index = 0;
     iteratee = cb(iteratee, context);
@@ -577,10 +606,11 @@
         if (a < b || b === void 0) return -1;
       }
       return left.index - right.index;
-    }), 'value');
+    }), '_.pluck');
   };
 
   // An internal function used for aggregate "group by" operations.
+  // group又是一个构造函数的函数下面的多个参数都是由group构造而来
   var group = function(behavior, partition) {
     return function(obj, iteratee, context) {
       var result = partition ? [
@@ -617,6 +647,19 @@
     else result[key] = 1;
   });
 
+  // Split a collection into two arrays: one whose elements all satisfy the given
+  // predicate, and one whose elements all do not satisfy the predicate.
+  // 将集合分为两个数组~并以这两个数组组成一个新的数组返回
+  // 两个数组放置的元素分别是满足 predicate断言的和不满足 predicate断言的
+  // 即 _.partition(array, predicate)函数返回的结果是[[所有符合 predicate断言的项], [所有不符合 predicate断言的项]]
+  _.partition = group(function(result, value, pass) {
+    result[pass ? 0 : 1].push(value);
+  }, true);
+
+
+  // 第一个表示不包含代理对代码点的所有字符
+  // 第二个表示合法的代理对的所有字符
+  // 第三个表示代理对的代码点（本身不是合法的Unicode字符）
   var reStrSymbol = /[^\ud800-\udfff]|[\ud800-\udbff][\udc00-\udfff]|[\ud800-\udfff]/g;
   // Safely create a real, live array from anything iterable.
   _.toArray = function(obj) {
@@ -635,12 +678,6 @@
     if (obj == null) return 0;
     return isArrayLike(obj) ? obj.length : _.keys(obj).length;
   };
-
-  // Split a collection into two arrays: one whose elements all satisfy the given
-  // predicate, and one whose elements all do not satisfy the predicate.
-  _.partition = group(function(result, value, pass) {
-    result[pass ? 0 : 1].push(value);
-  }, true);
 
   // Array Functions
   // ---------------
@@ -1139,17 +1176,6 @@
     return keys;
   };
 
-  // Retrieve the values of an object's properties.
-  _.values = function(obj) {
-    var keys = _.keys(obj);
-    var length = keys.length;
-    var values = Array(length);
-    for (var i = 0; i < length; i++) {
-      values[i] = obj[keys[i]];
-    }
-    return values;
-  };
-
   // Returns the results of applying the iteratee to each element of the object.
   // In contrast to _.map it returns an object.
   _.mapObject = function(obj, iteratee, context) {
@@ -1281,12 +1307,6 @@
     var result = baseCreate(prototype);
     if (props) _.extendOwn(result, props);
     return result;
-  };
-
-  // Create a (shallow-cloned) duplicate of an object.
-  _.clone = function(obj) {
-    if (!_.isObject(obj)) return obj;
-    return _.isArray(obj) ? obj.slice() : _.extend({}, obj);
   };
 
   // Invokes interceptor with the obj, and then returns obj.
