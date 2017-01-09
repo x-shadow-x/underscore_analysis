@@ -7,15 +7,20 @@
 
   // Baseline setup
   // --------------
-
+  
   // Establish the root object, `window` (`self`) in the browser, `global`
   // on the server, or `this` in some virtual machines. We use `self`
   // instead of `window` for `WebWorker` support.
+  // 打开一个网页，浏览器会创建一个窗口，这个窗口就是一个window对象~self指窗口本身，它返回的对象跟window对象是一样的
+  // 在Node.js中表示global对象
+  // 这里使用self来代替window是因为如果用户使用WebWorker来引入underscore的话全局对象只能通过self来指向，使用window会报错
+  // 具体WebWorker相关知识这边不细说~测试代码参考webworker.html
   var root = typeof self == 'object' && self.self === self && self ||
     typeof global == 'object' && global.global === global && global ||
     this;
 
   // Save the previous value of the `_` variable.
+  // 如果用户在引入underscore之前就已经使用了_ 并对其付了值~那么此处就可以通过previousUnderscore来存储用户原先保存在_的值
   var previousUnderscore = root._;
 
   // Save bytes in the minified (but not gzipped) version:
@@ -36,6 +41,7 @@
     nativeCreate = Object.create;
 
   // Naked function reference for surrogate-prototype-swapping.
+  // 定义了一个裸函数
   var Ctor = function() {};
 
   // Create a safe reference to the Underscore object for use below.
@@ -173,7 +179,7 @@
         case 2:
           return func.call(this, arguments[0], arguments[1], rest);
       }
-      // 当 startIndex很大的时候，那我们就不干了，直接用apply将所有的参数一次性传过去~此时就没有剩余参数的效果了
+      // 当 startIndex很大的时候，那我们就不干了，用一个循环将startIndex以前的参数加到数组~并将数组最后一项设为之前构建好的rest数组~
       // 不然如果startIndex真的很大的话，意味着我们要使用func.call来调用func以便把 rest之前的参数一个一个写出来传过去
       var args = Array(startIndex + 1);
       for (index = 0; index < startIndex; index++) {
@@ -565,6 +571,7 @@
   // [Fisher-Yates shuffle](http://en.wikipedia.org/wiki/Fisher–Yates_shuffle).
   // If **n** is not specified, returns a single random element.
   // The internal `guard` argument allows it to work with `map`.
+  // 随机打乱集合obj的项
   _.sample = function(obj, n, guard) {
     if (n == null || guard) {
       if (!isArrayLike(obj)) obj = _.values(obj);
@@ -694,12 +701,14 @@
   // Returns everything but the last entry of the array. Especially useful on
   // the arguments object. Passing **n** will return all the values in
   // the array, excluding the last N.
+  // 获得数组中前n项~如果没有指定n~则默认获得第一项
   _.initial = function(array, n, guard) {
     return slice.call(array, 0, Math.max(0, array.length - (n == null || guard ? 1 : n)));
   };
 
   // Get the last element of an array. Passing **n** will return the last N
   // values in the array.
+  // 获得数组倒数n项~如果没有指定n则默认获取最后一项
   _.last = function(array, n, guard) {
     if (array == null || array.length < 1) return void 0;
     if (n == null || guard) return array[array.length - 1];
@@ -709,16 +718,20 @@
   // Returns everything but the first entry of the array. Aliased as `tail` and `drop`.
   // Especially useful on the arguments object. Passing an **n** will return
   // the rest N values in the array.
+  // 返回从第n个到最后一个的所有项
   _.rest = _.tail = _.drop = function(array, n, guard) {
     return slice.call(array, n == null || guard ? 1 : n);
   };
 
   // Trim out all falsy values from an array.
+  // 去掉数组中值为false或是通过转换后为false的值~ js中这些值依次为：false, undefined, '', null, NaN, 0
   _.compact = function(array) {
     return _.filter(array, Boolean);
   };
 
   // Internal implementation of a recursive `flatten` function.
+  // 此处并非高阶函数~而是下面有好些功能都有类似的操作~故将这些操作提取到此函数~
+  // 如果参数shallow为true~则只会消除第一层的嵌套
   var flatten = function(input, shallow, strict, output) {
     output = output || [];
     var idx = output.length;
@@ -742,13 +755,34 @@
   };
 
   // Flatten out an array, either recursively (by default), or just one level.
+  // 此函数也是此工具库中处理数组的函数，用于将多层嵌套的数组转为一位数组
+  // 如果参数shallow为true~则只会消除第一层的嵌套
+  // 例如_.flatten([1, [2], [3, [[4]]]], true);结果为[1, 2, 3, [[4]]]
   _.flatten = function(array, shallow) {
     return flatten(array, shallow, false);
   };
 
   // Return a version of the array that does not contain the specified value(s).
+  // 假设有如下调用：_.without([1,2,3,4], 1, 2);  根据_.without的构建过程
+  // 最后两个参数 1，2将会因为restArgs的作用被处理成数组[1,2]传递给otherArrays参数
+  // 不过笔者不是很理解既然有了下面的difference~为啥还要在此基础上再包装一个without~
+  // 感觉这个函数就是在传参上与difference有所差异~其处理结果都是相同的
   _.without = restArgs(function(array, otherArrays) {
     return _.difference(array, otherArrays);
+  });
+
+  // Take the difference between one array and a number of other arrays.
+  // Only the elements present in just the first array will remain.
+  // 根据上面_.without函数体内的_.difference(array, otherArrays); rest将是结构为[otherArrays]的嵌套数组
+  // 以_.without([1,2,3,4], 1, 2); 为例~此时rest将是[[1,2]],于是第一行使用了内部方法flatten将其转为[1,2]
+  // 从_.difference的构建也可以看出其调用的时候不仅仅可以如此调用：_.difference([1,2,3,4,5,6,7], [1, 2, 3, 4]);
+  // 还可以传递多个剔除数组_.difference([1,2,3,4,5,6,7], [1, 2],[3, 4]);最后两个数组会因为restArgs的效果被构建成[[1,2],[3,4]]
+  // 之后再被flatten处理成一维数组[1,2,3,4]
+  _.difference = restArgs(function(array, rest) {
+    rest = flatten(rest, true, true);
+    return _.filter(array, function(value) {
+      return !_.contains(rest, value);
+    });
   });
 
   // Produce a duplicate-free version of the array. If the array has already
@@ -803,15 +837,6 @@
     }
     return result;
   };
-
-  // Take the difference between one array and a number of other arrays.
-  // Only the elements present in just the first array will remain.
-  _.difference = restArgs(function(array, rest) {
-    rest = flatten(rest, true, true);
-    return _.filter(array, function(value) {
-      return !_.contains(rest, value);
-    });
-  });
 
   // Complement of _.zip. Unzip accepts an array of arrays and groups
   // each array's elements on shared indices.
@@ -1469,6 +1494,7 @@
   };
 
   // Add some isType methods: isArguments, isFunction, isString, isNumber, isDate, isRegExp, isError, isMap, isWeakMap, isSet, isWeakSet.
+  // 构造各种类型判断函数
   _.each(['Arguments', 'Function', 'String', 'Number', 'Date', 'RegExp', 'Error', 'Symbol', 'Map', 'WeakMap', 'Set', 'WeakSet'], function(name) {
     _['is' + name] = function(obj) {
       return toString.call(obj) === '[object ' + name + ']';
@@ -1477,8 +1503,10 @@
 
   // Define a fallback version of the method in browsers (ahem, IE < 9), where
   // there isn't any inspectable "Arguments" type.
+  // ie9以下不识别 arguments所以当上面构造的isArguments函数不存在时此处做一个处理
   if (!_.isArguments(arguments)) {
     _.isArguments = function(obj) {
+      // callee放回正在执行的函数本身的引用，它是arguments的一个属性
       return _.has(obj, 'callee');
     };
   }
